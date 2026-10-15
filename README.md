@@ -8,14 +8,16 @@ so treat scores as study signals, not predictions.
 
 ## Put it online with GitHub Pages (no tools needed)
 
-The `docs/` folder is already built, so you only need to upload it.
+The site is already built. `index.html` and `app.js` are included both at the top level and in `docs/`,
+so it works with either Pages setting below.
 
-1. Create a new repository on GitHub (for example `arjun-ctp5-prep`). Public is simplest.
-2. Upload everything in this folder to the repository (drag and drop works on the "Add file > Upload files" page).
-   Make sure the `docs` folder comes along.
-3. Go to **Settings > Pages**.
-4. Under **Build and deployment**, set **Source** to **Deploy from a branch**, choose branch **main** and folder **/docs**, then **Save**.
-5. Wait a minute or two. The site will be at `https://YOUR-USERNAME.github.io/arjun-ctp5-prep/`.
+1. Create a new repository on GitHub (for example `arjun-ctp5-prep`).
+2. Open the repository, click **Add file > Upload files**, and drag in everything from this folder.
+   The files `index.html` and `app.js` must end up at the top of the repository (not inside another folder).
+3. Click **Commit changes**.
+4. Go to **Settings > Pages**. Under **Build and deployment**, set **Source** to **Deploy from a branch**,
+   choose branch **main** and folder **/ (root)**, then **Save**. (**/docs** also works.)
+5. Wait a minute or two. The site will be at `https://YOUR-USERNAME.github.io/REPOSITORY-NAME/`.
 
 Or from a terminal:
 
@@ -24,15 +26,18 @@ git init
 git add .
 git commit -m "CTP 5 prep app"
 git branch -M main
-git remote add origin https://github.com/YOUR-USERNAME/arjun-ctp5-prep.git
+git remote add origin https://github.com/YOUR-USERNAME/REPOSITORY-NAME.git
 git push -u origin main
 ```
 
-Then do steps 3 and 4 above.
+Then do step 4.
 
-Tip: a free GitHub Pages site is public. The content is only study material, but if you would
-rather keep it private, host it from a private repo on a plan that supports private Pages,
-or just open `docs/index.html` directly on your computer.
+## If the page is blank or says "Loading..." forever
+
+- Open `https://YOUR-USERNAME.github.io/REPOSITORY-NAME/app.js` in the browser. If you see "404", the file `app.js`
+  is not at the same level as `index.html` in your repository. Upload it again (it is in this folder).
+- Hard refresh the page (Ctrl+Shift+R, or Cmd+Shift+R on a Mac) after any change.
+- Make sure the Pages source branch and folder match where `index.html` and `app.js` actually are.
 
 ## Progress and devices
 
@@ -53,14 +58,16 @@ npm install
 npm run build
 ```
 
-This regenerates `docs/app.js` and `docs/index.html`. Commit and push, and the site updates.
+This regenerates `index.html` and `app.js` (and the copies in `docs/`). Commit and push, and the site updates.
 
 ## Project layout
 
 ```
-index.html        page template
-src/main.jsx      entry point
+index.html        built page (generated)
+app.js            built app (generated)
+docs/             copy of the built page and app, so Pages can also use /docs
 src/App.jsx       the whole app (data and screens)
+src/main.jsx      entry point
+src/index.template.html   page template used by the build
 build.mjs         build script (esbuild)
-docs/             built site that GitHub Pages serves
 ```
