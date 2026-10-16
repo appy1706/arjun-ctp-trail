@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useMemo, useRef, useCallback } from "react";
+import { CHECK_DATA } from "./checks.js";
 
 /* ============================================================
    Arjun's CTP 5 Prep: 14-day study plan, lessons, quizzes,
@@ -866,6 +867,26 @@ MODULES.forEach((m) => m.quiz.forEach((q) => { ALLQ[q.id] = q; }));
 TESTS.forEach((t) => t.sections.forEach((s) => s.qs.forEach((q) => { ALLQ[q.id] = q; })));
 const TOTAL_LESSONS = MODULES.reduce((a, m) => a + m.lessons.length, 0);
 
+// Mini checks: 3 short questions for each lesson. Choices are shuffled in a fixed, repeatable way.
+const seedShuffle = (arr, seed) => {
+  let h = 2166136261;
+  for (let i = 0; i < seed.length; i++) { h ^= seed.charCodeAt(i); h = Math.imul(h, 16777619); }
+  const a = arr.slice();
+  for (let i = a.length - 1; i > 0; i--) { h = Math.imul(h ^ (h >>> 15), 2246822507); h ^= h >>> 13; const j = Math.abs(h) % (i + 1); [a[i], a[j]] = [a[j], a[i]]; }
+  return a;
+};
+const LESSON_CHECK = {};
+Object.entries(CHECK_DATA).forEach(([lid, arr]) => {
+  const les = LESSON_BY_ID[lid];
+  LESSON_CHECK[lid] = arr.map((d, i) => {
+    const id = `${lid}-c${i + 1}`;
+    const o = seedShuffle([d.c, ...d.w], id + "o");
+    const q = { id, q: d.q, o, a: o.indexOf(d.c), e: d.e, tag: les.mod.id, mod: les.mod.id, pass: d.pass || null, check: lid };
+    ALLQ[id] = q;
+    return q;
+  });
+});
+
 const TAG_NAMES = { V: "Verbal reasoning", Q: "Quantitative reasoning", W: "Vocabulary", R: "Reading", M: "Writing mechanics", C: "Writing concepts", N: "Fractions, ratios, percents", A: "Algebra", G: "Geometry", D: "Data and probability" };
 
 const CHEAT = [
@@ -941,7 +962,7 @@ const fmtDate = (d) => `${WEEKDAYS[d.getDay()]}, ${d.toLocaleDateString("en-US",
 const shuffle = (arr) => { const a = arr.slice(); for (let i = a.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [a[i], a[j]] = [a[j], a[i]]; } return a; };
 const pct = (c, t) => (t ? Math.round((c / t) * 100) : 0);
 const clone = (o) => JSON.parse(JSON.stringify(o));
-const EMPTY = { lessons: {}, quiz: {}, tests: {}, missed: {}, flash: {}, tasks: {}, untimed: false };
+const EMPTY = { lessons: {}, quiz: {}, checks: {}, tests: {}, missed: {}, flash: {}, tasks: {}, untimed: false };
 
 const STORE_KEY = "arjun-ctp5-v1";
 async function loadProgress() {
@@ -970,7 +991,7 @@ function richHtml(s) {
 }
 function taskLabel(t) {
   switch (t.k) {
-    case "lesson": return `Lesson: ${LESSON_BY_ID[t.ref].title}`;
+    case "lesson": return `Lesson + mini check: ${LESSON_BY_ID[t.ref].title}`;
     case "quiz": return `Quiz: ${MOD_BY_ID[t.ref].name}`;
     case "test": return `Take ${TESTS.find((x) => x.id === t.ref).name}`;
     case "review": return `Review mistakes: ${TESTS.find((x) => x.id === t.ref).name.split(":")[0]}`;
@@ -1089,6 +1110,11 @@ h2.sec{font-size:20px;margin:18px 0 8px;letter-spacing:-.01em}
 .tbl{width:100%;border-collapse:collapse;font-size:15px}
 .tbl td,.tbl th{padding:8px 6px;border-top:1px solid var(--line);text-align:left}
 .tbl th{border-top:0;color:var(--muted);font-size:13px}
+.cdots{display:flex;flex-wrap:wrap;gap:6px;margin:6px 0 12px}
+.cdot{width:30px;height:30px;border-radius:50%;border:2px solid var(--line);background:var(--card);color:var(--ink);font-weight:700;font-size:12px;padding:0}
+.cdot.known{background:var(--good-bg);border-color:var(--good)}
+.cdot.learning{background:rgba(255,180,0,.22);border-color:var(--gold)}
+.cdot.cur{outline:3px solid var(--brand);outline-offset:1px}
 .note{font-size:13px;color:var(--muted)}
 `;
 
@@ -1141,7 +1167,7 @@ function Block({ b }) {
 }
 
 /* ===================== QUIZ RUNNER ===================== */
-function QuizRunner({ title, qs, onDone, onExit, onRetry }) {
+function QuizRunner({ title, qs, onDone, onExit, onRetry, onNext, nextLabel }) {
   const [i, setI] = useState(0);
   const [sel, setSel] = useState(null);
   const [checked, setChecked] = useState(false);
@@ -1164,7 +1190,8 @@ function QuizRunner({ title, qs, onDone, onExit, onRetry }) {
           <div className="bar good" style={{ marginBottom: 10 }}><i style={{ width: pct(right, qs.length) + "%" }} /></div>
           <p style={{ margin: "0 0 10px" }}>{pct(right, qs.length) >= 80 ? "Strong work. Check the misses below, then move on." : pct(right, qs.length) >= 60 ? "Solid start. Read each explanation below, then retry the misses." : "These are meant to be hard. Re-read the lesson, study the explanations below, and retry."}</p>
           <div className="row">
-            {wrong.length > 0 && <button className="btn" onClick={() => onRetry(wrong.map((w) => w.id))}>Retry the {wrong.length} I missed</button>}
+            {onNext && <button className="btn" onClick={onNext}>{nextLabel}</button>}
+            {wrong.length > 0 && <button className={"btn" + (onNext ? " ghost" : "")} onClick={() => onRetry(wrong.map((w) => w.id))}>Retry the {wrong.length} I missed</button>}
             <button className="btn ghost" onClick={onExit}>Done</button>
           </div>
         </div>
@@ -1379,38 +1406,66 @@ function TestReview({ test, rec, onBack, onDrill }) {
 }
 
 /* ===================== WORDS ===================== */
-function WordsView({ P, upd, range }) {
-  const [mode, setMode] = useState(range ? "set" : "all");
+function WordsView({ P, upd, range, go }) {
+  const fromPlan = !!range;                       // opened from a day of the plan: show only that day's cards
+  const [mode, setMode] = useState(fromPlan ? "set" : "all");
   const [pos, setPos] = useState(0);
   const [flip, setFlip] = useState(false);
-  const deck = useMemo(() => {
+  const [done, setDone] = useState(false);
+  const [focus, setFocus] = useState(null);       // the "still learning" cards from today's set, studied again
+  const baseDeck = useMemo(() => {
     let idx = WORDS.map((_, i) => i);
     if (mode === "set" && range && range !== "learning") { const [a, b] = range.split("-").map(Number); idx = idx.slice(a, b); }
     if (mode === "learning" || (mode === "set" && range === "learning")) idx = idx.filter((i) => P.flash[WORDS[i][0]] === "learning");
     return idx;
-  }, [mode, range, P.flash]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [mode, range]);
+  const deck = focus || baseDeck;
+  const n = deck.length;
+  const at = Math.min(pos, Math.max(0, n - 1));
+  const cur = n ? WORDS[deck[at]] : null;
+  const st = (i) => P.flash[WORDS[i][0]];
   const known = WORDS.filter((w) => P.flash[w[0]] === "known").length;
   const learning = WORDS.filter((w) => P.flash[w[0]] === "learning").length;
-  const cur = deck.length ? WORDS[deck[pos % deck.length]] : null;
-  const mark = (v) => { upd((n) => { n.flash[cur[0]] = v; }); setFlip(false); setPos((p) => p + 1); };
-  const chips = [["all", "All words"], ["learning", "Still learning"]];
-  if (range) chips.unshift(["set", range === "learning" ? "Today's review" : "Today's set"]);
+  const jump = (p) => { setPos(Math.max(0, Math.min(n - 1, p))); setFlip(false); setDone(false); };
+  const mark = (v) => { upd((x) => { x.flash[cur[0]] = v; }); setFlip(false); if (at >= n - 1) setDone(true); else setPos(at + 1); };
+  const chips = fromPlan ? [] : [["all", "All words"], ["learning", "Still learning"]];
+  const dKnown = deck.filter((i) => st(i) === "known").length;
+  const dLearning = deck.filter((i) => st(i) === "learning").length;
   return (
     <div>
       <div className="row spread" style={{ marginBottom: 10 }}>
-        <div className="row">{chips.map(([m, l]) => <button key={m} className={"btn sm " + (mode === m ? "" : "ghost")} onClick={() => { setMode(m); setPos(0); setFlip(false); }}>{l}</button>)}</div>
+        <div className="row">
+          {chips.map(([m, l]) => <button key={m} className={"btn sm " + (mode === m ? "" : "ghost")} onClick={() => { setMode(m); setFocus(null); setPos(0); setFlip(false); setDone(false); }}>{l}</button>)}
+          {fromPlan && <span className="chip">{focus ? "Still learning from today" : range === "learning" ? "Today's review" : "Today's set"}: <b>{n}</b> cards</span>}
+        </div>
         <div className="small muted">Known {known} | Learning {learning} | Total {WORDS.length}</div>
       </div>
-      {!cur ? <div className="card"><p>No words in this set yet. Mark some cards "Still learning" first, or switch to All words.</p></div> : (
+      {!cur ? <div className="card"><p>No words in this set yet. Mark some cards "Still learning" first, or switch to All words.</p>{fromPlan && <button className="btn" onClick={() => go({ name: "home" })}>Back to the plan</button>}</div>
+      : done ? (
+        <div className="card">
+          <h3>Set complete</h3>
+          <p style={{ margin: "0 0 10px" }}>You went through all {n} cards. Known: <b>{dKnown}</b>. Still learning: <b>{dLearning}</b>. Not marked: <b>{n - dKnown - dLearning}</b>.</p>
+          <div className="row">
+            {dLearning > 0 && <button className="btn" onClick={() => { setFocus(deck.filter((i) => st(i) === "learning")); setPos(0); setDone(false); setFlip(false); }}>Study the {dLearning} still learning</button>}
+            <button className="btn ghost" onClick={() => { setFocus(null); setPos(0); setDone(false); setFlip(false); }}>Go through the set again</button>
+            {fromPlan && <button className="btn ghost" onClick={() => go({ name: "home" })}>Back to the plan</button>}
+          </div>
+        </div>
+      ) : (
         <div>
-          <div className="small muted" style={{ marginBottom: 6 }}>Card {(pos % deck.length) + 1} of {deck.length}. Tap the card to flip.</div>
+          <div className="small muted" style={{ marginBottom: 6 }}>Card {at + 1} of {n}. Tap the card to flip it. You can go back to any earlier card.</div>
+          {n <= 24 && <div className="cdots">{deck.map((wi, k) => <button key={wi} className={"cdot" + (st(wi) === "known" ? " known" : st(wi) === "learning" ? " learning" : "") + (k === at ? " cur" : "")} aria-label={`Go to card ${k + 1}`} onClick={() => jump(k)}>{k + 1}</button>)}</div>}
           <button className="flash" onClick={() => setFlip(!flip)}>
             {!flip ? <div className="w">{cur[0]}</div> : <div><div className="d">{cur[1]}</div><div className="s">{cur[2]}</div></div>}
           </button>
           <div className="row" style={{ marginTop: 12 }}>
             <button className="btn ghost" onClick={() => mark("learning")}>Still learning</button>
             <button className="btn good" onClick={() => mark("known")}>Got it</button>
-            <button className="btn sm ghost" onClick={() => { setPos(pos + 1); setFlip(false); }}>Skip</button>
+          </div>
+          <div className="row" style={{ marginTop: 10 }}>
+            <button className="btn sm ghost" disabled={at === 0} onClick={() => jump(at - 1)}>Back</button>
+            {at < n - 1 ? <button className="btn sm ghost" onClick={() => jump(at + 1)}>Next card</button> : <button className="btn sm ghost" onClick={() => setDone(true)}>Finish</button>}
           </div>
         </div>
       )}
@@ -1540,7 +1595,7 @@ function ModuleView({ mod, P, go }) {
       <div className="muted" style={{ marginBottom: 12 }}>{mod.blurb}</div>
       {mod.lessons.map((l) => (
         <button key={l.id} className="mod" style={{ "--c": mod.color, marginBottom: 10 }} onClick={() => go({ name: "lesson", id: l.id })}>
-          <div className="row spread"><b>{l.title}</b><span className={"pill " + (P.lessons[l.id] ? "g" : "")}>{P.lessons[l.id] ? "Learned" : `${l.min} min`}</span></div>
+          <div className="row spread"><b>{l.title}</b><span className="row" style={{ gap: 6 }}>{P.checks && P.checks[l.id] && <span className="pill g">Check {P.checks[l.id].best[0]}/{P.checks[l.id].best[1]}</span>}<span className={"pill " + (P.lessons[l.id] ? "g" : "")}>{P.lessons[l.id] ? "Learned" : `${l.min} min`}</span></span></div>
         </button>
       ))}
       <div className="card" style={{ marginTop: 14 }}>
@@ -1557,6 +1612,7 @@ function LessonView({ lesson, P, upd, go }) {
   const idx = mod.lessons.findIndex((l) => l.id === lesson.id);
   const nxt = mod.lessons[idx + 1];
   const done = !!P.lessons[lesson.id];
+  const chk = P.checks && P.checks[lesson.id];
   return (
     <div>
       <button className="btn sm ghost" onClick={() => go({ name: "module", id: mod.id })}>{mod.name}</button>
@@ -1564,10 +1620,13 @@ function LessonView({ lesson, P, upd, go }) {
         <div className="muted small">Lesson {idx + 1} of {mod.lessons.length} | about {lesson.min} min</div>
         <h2 style={{ fontSize: 24, margin: "2px 0 14px" }}>{lesson.title}</h2>
         <div className="lesson">{lesson.blocks.map((b, i) => <Block key={i} b={b} />)}</div>
-        <div className="row" style={{ marginTop: 16 }}>
-          {!done ? <button className="btn good" onClick={() => upd((n) => { n.lessons[lesson.id] = true; })}>Mark as learned</button> : <span className="pill g">Learned</span>}
-          {nxt ? <button className="btn" onClick={() => { upd((n) => { n.lessons[lesson.id] = true; }); go({ name: "lesson", id: nxt.id }); }}>Next lesson</button>
-            : <button className="btn" onClick={() => { upd((n) => { n.lessons[lesson.id] = true; }); go({ name: "quiz", kind: "module", mod: mod.id }); }}>Take the quiz</button>}
+        <div className="note" style={{ marginTop: 16 }}>Finish with a 3-question mini check. The lesson counts as learned when you complete it.</div>
+        <div className="row" style={{ marginTop: 12 }}>
+          {done && <span className="pill g">Learned</span>}
+          {chk && <span className={"pill " + (chk.best[0] === chk.best[1] ? "g" : "")}>Check best {chk.best[0]}/{chk.best[1]}</span>}
+          <button className="btn" onClick={() => go({ name: "quiz", kind: "check", lesson: lesson.id })}>{chk ? "Retake the mini check" : "Take the mini check"}</button>
+          {nxt && done && <button className="btn ghost" onClick={() => go({ name: "lesson", id: nxt.id })}>Next lesson</button>}
+          {!nxt && done && <button className="btn ghost" onClick={() => go({ name: "quiz", kind: "module", mod: mod.id })}>Take the quiz</button>}
         </div>
       </div>
     </div>
@@ -1637,6 +1696,14 @@ function ReviewView({ P, go, onRestore }) {
           ); })}
         </tbody></table>
       </div>
+      <h2 className="sec">Mini check scores</h2>
+      <div className="card">
+        <table className="tbl"><thead><tr><th>Lesson</th><th>Best</th><th>Last</th><th>Tries</th></tr></thead><tbody>
+          {MODULES.flatMap((m) => m.lessons).map((l) => { const r = P.checks && P.checks[l.id]; return (
+            <tr key={l.id}><td>{l.title}</td><td>{r ? `${r.best[0]}/${r.best[1]}` : "-"}</td><td>{r ? `${r.last[0]}/${r.last[1]}` : "-"}</td><td>{r ? r.n : 0}</td></tr>
+          ); })}
+        </tbody></table>
+      </div>
       <h2 className="sec">Test scores</h2>
       <div className="card">
         <table className="tbl"><thead><tr><th>Test</th><th>Last</th><th>Best</th><th></th></tr></thead><tbody>
@@ -1703,9 +1770,15 @@ export default function App() {
   const tabs = [["home", "Plan"], ["learn", "Learn"], ["tests", "Tests"], ["words", "Words"], ["review", "Review"], ["cheat", "Cheat sheet"]];
   const inTest = view.name === "test";
 
-  const recordQuiz = (log, kind, mod) => {
+  const recordQuiz = (log, kind, mod, lesson) => {
     upd((n) => {
       log.forEach((l) => { if (l.ok) delete n.missed[l.id]; else n.missed[l.id] = true; });
+      if (kind === "check" && lesson) {
+        const c = log.filter((l) => l.ok).length, t = log.length;
+        const old = n.checks[lesson];
+        n.checks[lesson] = { best: old && pct(...old.best) >= pct(c, t) ? old.best : [c, t], last: [c, t], n: (old ? old.n : 0) + 1 };
+        n.lessons[lesson] = true;   // a lesson counts as learned once its mini check is finished
+      }
       if (kind === "module" && mod) {
         const c = log.filter((l) => l.ok).length, t = log.length;
         const old = n.quiz[mod];
@@ -1749,12 +1822,13 @@ export default function App() {
   } else if (view.name === "testreview") {
     const t = TESTS.find((x) => x.id === view.testId);
     body = <TestReview test={t} rec={P.tests[t.id]} onBack={() => go({ name: "tests" })} onDrill={(ids) => go({ name: "quiz", kind: "ids", ids, title: "Drill: my misses" })} />;
-  } else if (view.name === "words") body = <WordsView key={runKey} P={P} upd={upd} range={view.range} />;
+  } else if (view.name === "words") body = <WordsView key={runKey} P={P} upd={upd} range={view.range} go={go} />;
   else if (view.name === "review") body = <ReviewView P={P} go={go} onRestore={(o) => setP({ ...EMPTY, ...o })} />;
   else if (view.name === "cheat") body = <CheatView />;
   else if (view.name === "quiz") {
     let qs = [], title = "Quiz";
-    if (view.kind === "module") { const m = MOD_BY_ID[view.mod]; qs = m.quiz; title = `${m.name} quiz`; }
+    if (view.kind === "check") { qs = LESSON_CHECK[view.lesson] || []; title = `Mini check: ${LESSON_BY_ID[view.lesson].title}`; }
+    else if (view.kind === "module") { const m = MOD_BY_ID[view.mod]; qs = m.quiz; title = `${m.name} quiz`; }
     else if (view.kind === "weak") { qs = shuffle(Object.keys(P.missed).filter((id) => ALLQ[id])).slice(0, 20).map((id) => ALLQ[id]); title = "Weak-spot drill"; }
     else if (view.kind === "challenge") { qs = shuffle(MODULES.flatMap((m) => m.quiz)).slice(0, 20); title = "Challenge round"; }
     else if (view.kind === "ids") { qs = view.ids.map((id) => ALLQ[id]).filter(Boolean); title = view.title || "Drill"; }
@@ -1786,13 +1860,22 @@ export default function App() {
 // Holds the quiz questions steady for the whole run (the missed list changes as answers are recorded)
 function QuizRunnerHolder({ qs, title, view, recordQuiz, go }) {
   const fixed = useRef(qs).current;
-  const exit = () => go(view.kind === "module" ? { name: "module", id: view.mod } : { name: "review" });
+  const exit = () => go(view.kind === "check" ? { name: "lesson", id: view.lesson } : view.kind === "module" ? { name: "module", id: view.mod } : { name: "review" });
+  let onNext = null, nextLabel = "";
+  if (view.kind === "check") {
+    const les = LESSON_BY_ID[view.lesson], mod = les.mod;
+    const nxt = mod.lessons[mod.lessons.findIndex((l) => l.id === les.id) + 1];
+    onNext = () => go(nxt ? { name: "lesson", id: nxt.id } : { name: "quiz", kind: "module", mod: mod.id });
+    nextLabel = nxt ? "Next lesson" : `Take the ${mod.name} quiz`;
+  }
   return (
     <QuizRunner
       title={title}
       qs={fixed}
-      onDone={(log) => recordQuiz(log, view.kind, view.mod)}
+      onDone={(log) => recordQuiz(log, view.kind, view.mod, view.lesson)}
       onExit={exit}
+      onNext={onNext}
+      nextLabel={nextLabel}
       onRetry={(ids) => go({ name: "quiz", kind: "ids", ids, title: "Retry: missed questions" })}
     />
   );
